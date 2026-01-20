@@ -69,4 +69,4 @@ Proekt iske túskennen soń, barlıq API endpointlerdi tómendegi silteme arqal�
 
 ## 👤 Avtor: Maman Dauletov
 
-Repozitoriy: [github.com/d1knight/Online-D-kan-API](https://github.com/d1knight/Online-D-kan-API)
+Repozitoriy: [github.com/d1knight/online-dukan](https://github.com/d1knight/online_dukan)
