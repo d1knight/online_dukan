@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:13
+    environment:
+      - POSTGRES_DB=dukan_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Nesli2024
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+  web:
+    build: .
+    command: sh -c "sleep 5 && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      - DB_HOST=db
+      - DB_NAME=dukan_db
+      - DB_USER=postgres
+      - DB_PASSWORD=Nesli2024
+volumes:
+  pg_data:
