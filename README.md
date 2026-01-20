@@ -30,7 +30,7 @@ Eń ańsat jolı — Docker-den paydalanıw.
 1.  **Repozitoriydi júklep alıń:**
     ```bash
     git clone https://github.com/d1knight/online_dukan.git
-    cd Online-D-kan-API
+    cd online_store
     ```
 
 2.  **`.env` fayl jaratıń:**
