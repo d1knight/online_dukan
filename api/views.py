@@ -4,33 +4,31 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_yasg.utils import swagger_auto_schema
-
+from django.db import transaction
 from .models import *
 from .serializers import *
 from .filters import ProductFilter
 
-# 1. Авторизация
+# 1. Avtorizaciya
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     permission_classes = (permissions.AllowAny,)
     serializer_class = RegisterSerializer
 
-#  Продукты
+# 2. Onimler
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.filter(is_active=True)
     serializer_class = ProductSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_class = ProductFilter # Фильтр min_price, max_price
+    filterset_class = ProductFilter
     search_fields = ['name']
     ordering_fields = ['price']
 
-    # Админ может все, остальные только смотреть
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
-    # Добавить отзыв (POST /products/{id}/review/)
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def review(self, request, pk=None):
         product = self.get_object()
@@ -42,7 +40,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         )
         return Response({'status': 'Review added'})
 
-# Корзина
+# 3. Sebet (Cart)
 class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -68,41 +66,67 @@ class CartViewSet(viewsets.ViewSet):
         item.save()
         return Response({"status": "Added"})
 
-    # Удаление (DELETE /cart/remove/{id}/)
     @action(detail=False, methods=['delete'], url_path='remove/(?P<product_id>\d+)')
     def remove(self, request, product_id=None):
         cart, _ = Cart.objects.get_or_create(user=request.user)
         CartItem.objects.filter(cart=cart, product_id=product_id).delete()
         return Response({"status": "Removed"})
 
-# Подверждение
+# 4. Checkout (Buyirtpa beriw)
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
-    @swagger_auto_schema(request_body=OrderSerializer)
+    @swagger_auto_schema(request_body=CheckoutSerializer)
     def post(self, request):
-        user = request.user
-        cart, _ = Cart.objects.get_or_create(user=user)
-        items = cart.items.all()
-        if not items: return Response({"error": "Empty cart"}, 400)
-        
-        total = 0
-        for item in items:
-            if item.product.stock < item.quantity:
-                return Response({"error": f"{item.product.name} out of stock"}, 400)
-            total += item.product.price * item.quantity
-            
-        order = Order.objects.create(user=user, total_price=total, address=request.data.get('address', user.address))
-        
-        for item in items:
-            OrderItem.objects.create(order=order, product=item.product, price=item.product.price, quantity=item.quantity)
-            item.product.stock -= item.quantity
-            item.product.save()
-            
-        items.delete()
-        return Response({"status": "Success", "order_id": order.id}, status=201)
+        serializer = CheckoutSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
 
-# 5. Orders
+        user = request.user
+        selected_ids = serializer.validated_data.get('selected_products')
+        address = serializer.validated_data.get('address', user.address)
+
+        cart, _ = Cart.objects.get_or_create(user=user)
+        
+        items_to_buy = cart.items.select_related('product').filter(product_id__in=selected_ids)
+        
+        if not items_to_buy.exists():
+            return Response({"error": "Tańlanǵan tawarlar sebetten tabılmadı."}, status=400)
+        
+        try:
+            with transaction.atomic():
+                total = 0
+                for item in items_to_buy:
+                    if item.product.stock < item.quantity:
+                        raise ValueError(f"{item.product.name} qoymada jetkiliksiz!")
+                    total += item.product.price * item.quantity
+                
+                order = Order.objects.create(user=user, total_price=total, address=address)
+                
+                for item in items_to_buy:
+                    OrderItem.objects.create(
+                        order=order, 
+                        product=item.product, 
+                        price=item.product.price, 
+                        quantity=item.quantity
+                    )
+                    item.product.stock -= item.quantity
+                    item.product.save()
+                
+                items_to_buy.delete()
+                
+                return Response({
+                    "status": "Success", 
+                    "order_id": order.id,
+                    "message": "Buyırtpa rásmiylestirildi."
+                }, status=201)
+
+        except ValueError as e:
+            return Response({"error": str(e)}, status=400)
+        except Exception as e:
+            return Response({"error": "Server qáteligi", "details": str(e)}, status=500)
+
+# 5. Orders History
 class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]

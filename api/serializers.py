@@ -12,7 +12,6 @@ class RegisterSerializer(serializers.ModelSerializer):
 class CategorySerializer(serializers.ModelSerializer):
     class Meta: model = Category; fields = '__all__'
 
-# Review Serializer отзыв
 class ReviewSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     class Meta:
@@ -20,9 +19,9 @@ class ReviewSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'rating', 'comment', 'created_at']
 
 class ProductSerializer(serializers.ModelSerializer):
-    category = CategorySerializer(read_only=True) # Nested Serializer
+    category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all(), source='category', write_only=True)
-    reviews = ReviewSerializer(many=True, read_only=True) # Отзывты корсетемиз
+    reviews = ReviewSerializer(many=True, read_only=True)
     
     class Meta: model = Product; fields = '__all__'
 
@@ -38,3 +37,11 @@ class OrderItemSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     class Meta: model = Order; fields = '__all__'
+
+class CheckoutSerializer(serializers.Serializer):
+    address = serializers.CharField(required=False)
+    selected_products = serializers.ListField(
+        child=serializers.IntegerField(),
+        write_only=True,
+        required=True
+    )

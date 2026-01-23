@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from datetime import timedelta
 
 load_dotenv()
 
@@ -96,3 +97,11 @@ SWAGGER_SETTINGS = {
 
 # Email Console Backend (для теста Сигналов)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),   # было, например, 5 минут
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),   # refresh токен
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': True,
+}
