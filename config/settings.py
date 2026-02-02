@@ -53,6 +53,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'  
 
 DATABASES = {
     'default': {
@@ -65,10 +66,10 @@ DATABASES = {
     }
 }
 
-AUTH_PASSWORD_VALIDATORS = [] # Ансат пароль
+AUTH_PASSWORD_VALIDATORS = []  # Простой пароль
 AUTH_USER_MODEL = 'api.User'
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'en-us' 
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
@@ -85,23 +86,50 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 10, 
+    'PAGE_SIZE': 10,
 }
 
-# Swagger JWT settings
 SWAGGER_SETTINGS = {
     'SECURITY_DEFINITIONS': {
         'Bearer': {'type': 'apiKey', 'name': 'Authorization', 'in': 'header'}
     }
 }
 
-# Email Console Backend (для теста Сигналов)
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),   # было, например, 5 минут
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),   # refresh токен
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=2),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_WEBHOOK_PATH = 'telegram/webhook/'  
+
+
+STATIC_URL = '/static/'
+
+
+
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+# ---------------------------
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+
+# 1. Разрешаем CORS (запросы с других доменов)
+CORS_ALLOW_ALL_ORIGINS = True 
+CORS_ALLOW_CREDENTIALS = True
+
+# 2. ВАЖНО: Разрешаем CSRF для Ngrok (именно это часто вызывает ошибку)
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.ngrok-free.dev',
+    'https://*.ngrok-free.app',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]
+
+# 3. Сообщаем Django, что мы за прокси (Ngrok), чтобы он понимал HTTPS
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

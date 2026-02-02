@@ -6,3 +6,5 @@ psycopg2-binary
 Pillow
 django-filter
 python-dotenv
+requests>=2.31.0
+uvicorn>=0.30.0

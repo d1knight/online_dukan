@@ -1,7 +1,7 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.core.mail import send_mail
-from .models import User, Cart  # <-- Импортируем Cart
+from .models import User, Cart 
 
 # Сигнал для отправки Email (ваш старый код)
 @receiver(post_save, sender=User)
@@ -16,7 +16,7 @@ def send_welcome_email(sender, instance, created, **kwargs):
             fail_silently=True,
         )
 
-# --- НОВЫЙ КОД: Автоматическое создание корзины ---
+# --- Автоматическое создание корзины ---
 @receiver(post_save, sender=User)
 def create_user_cart(sender, instance, created, **kwargs):
     if created:

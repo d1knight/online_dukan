@@ -1,35 +1,43 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.core.validators import MinValueValidator, MaxValueValidator
-from django.utils.text import slugify  # <--- Импортируем slugify
+from django.utils.text import slugify
 
-# Пайдаланыушылар
+# Юзерлардыки
 class User(AbstractUser):
     ROLES = (('admin', 'Admin'), ('client', 'Client'))
     role = models.CharField(max_length=10, choices=ROLES, default='client')
-    phone = models.CharField(max_length=20, blank=True)
+    # Телефон уникальный логиндай
+    phone = models.CharField(max_length=20, blank=True, unique=True) 
     address = models.TextField(blank=True)
+    REQUIRED_FIELDS = ['phone']
+    
+    # --- TELEGRAMнын полясы ---
+    telegram_chat_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    verification_code = models.CharField(max_length=6, null=True, blank=True)
+    code_expires_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return self.username or self.phone
 
 # Категориялар
 class Category(models.Model):
     name = models.CharField(max_length=100)
-    # blank=True разрешает создавать категорию без ручного ввода слага
     slug = models.SlugField(unique=True, blank=True) 
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
-
+    
     def __str__(self): return self.name
 
-    # АВТОМАТИЧЕСКАЯ ГЕНЕРАЦИЯ СЛАГА
     def save(self, *args, **kwargs):
-        if not self.slug:  # Если слаг не передан
-            self.slug = slugify(self.name)  # Создаем его из имени (Smartfon -> smartfon)
+        if not self.slug:
+            self.slug = slugify(self.name)
         super().save(*args, **kwargs)
 
 # Продуктлар
 class Product(models.Model):
     category = models.ForeignKey(Category, on_delete=models.CASCADE, related_name='products')
     name = models.CharField(max_length=200)
-    slug = models.SlugField(blank=True) # Тоже можно сделать автоматическим
+    slug = models.SlugField(blank=True)
     description = models.TextField()
     price = models.DecimalField(max_digits=10, decimal_places=2)
     discount_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -41,7 +49,6 @@ class Product(models.Model):
     
     def __str__(self): return self.name
 
-    # Тоже добавим авто-слаг для продуктов, чтобы было удобно
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.name)
@@ -51,11 +58,11 @@ class Product(models.Model):
 class Cart(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
 
-# Корзинага косылган онын 1 элементы
 class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField(default=1)
+    # --- ÓZGERIS: Sanı 1 den kishi bolmawi kerek ---
+    quantity = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
 
 # Заказлар
 class Order(models.Model):
@@ -66,12 +73,12 @@ class Order(models.Model):
     address = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
-#Заказлардын 1 элементы
+#Заказ_id(1шт)
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    quantity = models.PositiveIntegerField()
+    quantity = models.PositiveIntegerField(validators=[MinValueValidator(1)])
 
 # Отзывлар
 class Review(models.Model):

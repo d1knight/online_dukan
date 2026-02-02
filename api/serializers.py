@@ -1,80 +1,57 @@
 from rest_framework import serializers
+from django.utils import timezone
 from .models import *
 
-# 1. Registraciya
-class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    
+
+class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('username', 'password', 'first_name', 'phone', 'address')
-    
-    def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        fields = ['id', 'username', 'first_name', 'last_name', 'phone', 'address']
+        read_only_fields = ['username', 'phone']
 
-# 2. Kategoriya
 class CategorySerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Category
-        fields = '__all__'
+    class Meta: model = Category; fields = '__all__'
 
-# 3. Review (Pikirler)
 class ReviewSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
-    
-    class Meta:
-        model = Review
-        fields = ['id', 'username', 'rating', 'comment', 'created_at']
+    class Meta: model = Review; fields = ['id', 'username', 'rating', 'comment', 'created_at']
 
-# 4. Product (Onimler)
 class ProductSerializer(serializers.ModelSerializer):
-    # Kategoriya maǵlıwmatların tolıq kórsetiw
-    category = CategorySerializer(read_only=True)
-    # Onim qosqanda ID arqalı tańlaw ushın
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=Category.objects.all(), source='category', write_only=True
-    )
-    # Onimge tiyisli pikirlerdi kórsetiw
-    reviews = ReviewSerializer(many=True, read_only=True)
-    
-    class Meta:
-        model = Product
-        fields = '__all__'
+    category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())
+    class Meta: model = Product; fields = '__all__'
 
-# 5. Cart Item (Sebet elementleri)
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
-    product_id = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all(), source='product', write_only=True
-    )
-    
-    class Meta:
-        model = CartItem
-        fields = ['id', 'product', 'product_id', 'quantity']
+    product_id = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), source='product', write_only=True)
+    class Meta: model = CartItem; fields = ['id', 'product', 'product_id', 'quantity']
 
-# 6. Order Item (Buyırtpa elementleri)
 class OrderItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
-    
-    class Meta:
-        model = OrderItem
-        fields = ['product_name', 'price', 'quantity']
+    class Meta: model = OrderItem; fields = ['product_name', 'price', 'quantity']
 
-# 7. Order (Buyırtpa)
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
-    
-    class Meta:
-        model = Order
-        fields = '__all__'
+    class Meta: model = Order; fields = '__all__'
 
-# 8. CHECKOUT SERIALIZER (Tańlap satıp alıw ushın)
 class CheckoutSerializer(serializers.Serializer):
     address = serializers.CharField(required=False)
-    # Paydalanıwshı satıp almaqshı bolǵan ónimlerdiń ID dizimi (Mısalı: [1, 5, 10])
-    selected_products = serializers.ListField(
-        child=serializers.IntegerField(),
-        write_only=True,
-        required=True,
-        help_text="Satıp alınatuǵın ónimlerdiń ID dizimi (Mısalı: [1, 5])"
-    )
+    selected_products = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=True)
+
+class TelegramLoginSerializer(serializers.Serializer):
+    phone = serializers.CharField(required=False, allow_blank=True, default=None)
+    code = serializers.CharField(max_length=6, required=True)
+
+    def validate(self, data):
+        code = data.get('code'); phone = data.get('phone')
+        if not code or len(code) != 6 or not code.isdigit(): raise serializers.ValidationError("Kod 6 san bolıwı kerek")
+        if phone:
+            phone = phone.strip()
+            if not phone.startswith('+'): phone = '+' + phone
+            try: user = User.objects.get(phone=phone)
+            except User.DoesNotExist: raise serializers.ValidationError("Paydalanıwshı tabılmadı")
+        else:
+            user = User.objects.filter(verification_code=code, code_expires_at__gt=timezone.now()).first()
+            if not user: raise serializers.ValidationError("Kod qate yamasa waqtı ótken")
+        if user.code_expires_at and user.code_expires_at < timezone.now(): raise serializers.ValidationError("Kod waqtı ótti")
+        if user.verification_code != code: raise serializers.ValidationError("Kod qate")
+        return {'user': user}

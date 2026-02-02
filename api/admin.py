@@ -8,14 +8,12 @@ class CategoryAdmin(admin.ModelAdmin):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    # Показываем эти поля в списке
     list_display = ('name', 'category', 'price', 'stock', 'is_active')
-    # Добавляем фильтры справа
+    # фильтрлар
     list_filter = ('category', 'is_active')
     search_fields = ('name',)
     # Автозаполнение слага
     prepopulated_fields = {'slug': ('name',)}
-    # !!! ГЛАВНОЕ: Разрешаем редактировать эти поля прямо в списке, не заходя в товар
     list_editable = ('is_active', 'stock', 'price')
 
 class OrderItemInline(admin.TabularInline):
