@@ -20,19 +20,15 @@ from .filters import ProductFilter, CategoryFilter
 from .utils import send_telegram_message
 from .pagination import CustomPagination
 
-# 1. Profile (TEK GET HÁM PATCH)
+# 1. Profile
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
-    
-    # --- ÓZGERIS: Tek GET hám PATCH ruxsat etiledi (PUT joq) ---
     http_method_names = ['get', 'patch']
-    # -----------------------------------------------------------
-
     def get_object(self):
         return self.request.user
 
-# 2. Categories (Pagination óshirilgen)
+# 2. Categories
 class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
@@ -59,8 +55,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy', 'toggle_active']:
             return [permissions.IsAdminUser()]
+        if self.action in ['add_review']:
+            return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
+    @swagger_auto_schema(operation_description="Получить отзывы товара")
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def reviews(self, request, pk=None):
         product = self.get_object()
@@ -72,24 +71,53 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = ReviewSerializer(reviews, many=True)
         return Response(serializer.data)
 
+    @swagger_auto_schema(
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'rating': openapi.Schema(type=openapi.TYPE_INTEGER, description="1-5"), 
+                'comment': openapi.Schema(type=openapi.TYPE_STRING)
+            }
+        )
+    )
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path='add_review')
     def add_review(self, request, pk=None):
+        # Защита от анонимов
+        if not request.user.is_authenticated:
+            return Response({"error": "Avtorizatsiyadan o'tiń"}, status=status.HTTP_401_UNAUTHORIZED)
+
         product = self.get_object()
         user = request.user
-        if Review.objects.filter(user=user, product=product).exists():
-            return Response({"error": "Siz aldın pikir qaldırg'ansız!"}, status=400)
         
         has_purchased = OrderItem.objects.filter(order__user=user, product=product).exists()
         if not has_purchased:
             return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
 
         rating = request.data.get('rating')
-        if not rating or int(rating) < 1 or int(rating) > 5:
-             return Response({"error": "Reyting 1 hám 5 aralığında bolıwı kerek"}, status=400)
+        comment = request.data.get('comment')
 
-        Review.objects.create(user=user, product=product, rating=rating, comment=request.data.get('comment', ''))
-        return Response({'status': 'Pikir qosıldı!'}, status=201)
+        if not rating and not comment:
+             return Response({"error": "Reyting yamasa kommentariy jazıwıńız kerek"}, status=400)
 
+        if rating is not None:
+            try:
+                rating = int(rating)
+                if not (1 <= rating <= 5): raise ValueError
+            except (ValueError, TypeError):
+                return Response({"error": "Reyting 1 hám 5 aralığında bolıwı kerek"}, status=400)
+
+        defaults = {}
+        if comment is not None: defaults['comment'] = comment
+        if rating is not None: defaults['rating'] = rating
+
+        review, created = Review.objects.update_or_create(
+            user=user, product=product,
+            defaults=defaults
+        )
+        msg = "Pikir qosıldı!" if created else "Pikir jańalandı!"
+        return Response({'status': msg}, status=201 if created else 200)
+
+    @swagger_auto_schema(auto_schema=None)
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def toggle_active(self, request, pk=None):
         product = self.get_object()
@@ -101,20 +129,29 @@ class ProductViewSet(viewsets.ModelViewSet):
 # 4. Cart
 class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
-    pagination_class = CustomPagination
+    # Pagination здесь не нужен для list, так как мы возвращаем один объект Cart
 
     @swagger_auto_schema(responses={200: CartSerializer()})
     def list(self, request):
         cart, _ = Cart.objects.get_or_create(user=request.user)
+        # Возвращаем корзину целиком (с total_price и cart_items)
         serializer = CartSerializer(cart)
         return Response(serializer.data)
 
-    @swagger_auto_schema(request_body=CartItemSerializer)
+    @swagger_auto_schema(
+        request_body=CartAddSerializer, 
+        responses={200: "Добавлено", 400: "Ошибка"}
+    )
     @action(detail=False, methods=['post'])
     def add(self, request):
-        p_id = request.data.get('product_id')
-        try: qty = int(request.data.get('quantity', 1))
-        except (ValueError, TypeError): return Response({"error": "San bolıwı kerek"}, 400)
+        # Используем отдельный сериализатор для валидации входных данных
+        serializer = CartAddSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=400)
+
+        p_id = serializer.validated_data['product_id']
+        qty = serializer.validated_data['quantity']
+
         if qty < 1: return Response({"error": "Sanı 1 den kem bolmawı kerek"}, 400)
 
         try: product = Product.objects.get(id=p_id)
@@ -130,13 +167,19 @@ class CartViewSet(viewsets.ViewSet):
         item.save()
         return Response({"status": "Qosıldı"})
 
-    @action(detail=False, methods=['delete'], url_path=r'remove/(?P<product_id>\d+)')
-    def remove(self, request, product_id=None):
+    @swagger_auto_schema(
+        manual_parameters=[openapi.Parameter('cart_item_id', openapi.IN_PATH, description="ID элемента корзины", type=openapi.TYPE_INTEGER)]
+    )
+    @action(detail=False, methods=['delete'], url_path=r'remove/(?P<cart_item_id>\d+)')
+    def remove(self, request, cart_item_id=None):
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        CartItem.objects.filter(cart=cart, product_id=product_id).delete()
-        return Response({"status": "Óshirildi"})
+        item = CartItem.objects.filter(cart=cart, id=cart_item_id).first()
+        if item:
+            item.delete()
+            return Response({"status": "Óshirildi"}, status=200)
+        return Response({"error": "Tabılmadı"}, status=404)
 
-# 5. Checkout (Cart Item ID menen)
+# 5. Checkout
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
@@ -150,7 +193,7 @@ class CheckoutView(APIView):
         address = serializer.validated_data.get('address', user.address)
         
         cart, _ = Cart.objects.get_or_create(user=user)
-        # Cart Item ID boyınsha izleymiz
+        # Фильтруем по ID элементов корзины
         items_to_buy = cart.items.select_related('product').filter(id__in=selected_cart_item_ids)
         
         if not items_to_buy.exists(): return Response({"error": "Tovar tańlanbadi"}, 400)
@@ -174,6 +217,7 @@ class CheckoutView(APIView):
                     item.product.stock -= item.quantity
                     item.product.save()
                 
+                # Удаляем купленные элементы из корзины
                 items_to_buy.delete()
                 return Response({"status": "Buyırtpa qabıllandı", "order_id": order.id, "total_price": total}, 201)
         except ValueError as e: return Response({"error": str(e)}, 400)
@@ -186,7 +230,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by('-created_at')
 
-# Telegram Webhook
+# 7. Telegram
 @method_decorator(csrf_exempt, name='dispatch')
 class TelegramWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -198,10 +242,12 @@ class TelegramWebhookView(APIView):
         chat_id = message.get('chat', {}).get('id')
         text = message.get('text', '')
         contact = message.get('contact')
+        
         from_user = message.get('from', {})
         first_name = from_user.get('first_name', '') or ""
         last_name = from_user.get('last_name', '') or ""
         tg_username = from_user.get('username')
+
         if not chat_id: return Response(status=status.HTTP_200_OK)
 
         if text == '/start':
@@ -217,10 +263,12 @@ class TelegramWebhookView(APIView):
             if user.telegram_chat_id != str(chat_id): user.telegram_chat_id = str(chat_id); changed = True
             if user.first_name != first_name: user.first_name = first_name; changed = True
             if user.last_name != last_name: user.last_name = last_name; changed = True
+            
             new_username = tg_username if tg_username else first_name
             if not new_username: new_username = phone
             if user.username != new_username:
                 if not User.objects.filter(username=new_username).exclude(id=user.id).exists(): user.username = new_username; changed = True
+            
             if changed: user.save()
 
             if created: send_telegram_message(chat_id, "🎉 <b>Siz tabıslı dizimnen óttińiz!</b>")
