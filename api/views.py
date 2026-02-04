@@ -35,7 +35,59 @@ class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     pagination_class = None 
     permission_classes = [permissions.AllowAny]
     filter_backends = [DjangoFilterBackend]
-    filterset_class = CategoryFilter 
+    filterset_class = CategoryFilter
+    
+    @swagger_auto_schema(
+        operation_description="""
+        Получить список категорий.
+        
+        **По умолчанию**: возвращаются только корневые (родительские) категории.
+        
+        **Фильтры**:
+        - `parent` (ID) - получить дочерние категории по ID родителя
+          Пример: `/api/categories/?parent=1`
+        
+        - `parent_name` (string) - получить дочерние категории по имени родителя
+          Пример: `/api/categories/?parent_name=Telephone`
+          Пример: `/api/categories/?parent_name=Electronics`
+        """,
+        manual_parameters=[
+            openapi.Parameter(
+                'parent',
+                openapi.IN_QUERY,
+                description="ID родительской категории для получения дочерних категорий",
+                type=openapi.TYPE_INTEGER,
+                required=False
+            ),
+            openapi.Parameter(
+                'parent_name',
+                openapi.IN_QUERY,
+                description="Имя родительской категории для получения дочерних категорий (например: Telephone, Electronics)",
+                type=openapi.TYPE_STRING,
+                required=False
+            ),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+    
+    def get_queryset(self):
+        """
+        По умолчанию возвращает только корневые категории (parent=null).
+        Для получения дочерних категорий используйте фильтры:
+        - ?parent=<id> - по ID родителя
+        - ?parent_name=<name> - по имени родителя
+        
+        Примеры:
+        - GET /api/categories/ -> только корневые категории
+        - GET /api/categories/?parent=1 -> дочерние категории parent_id=1
+        - GET /api/categories/?parent_name=Telephone -> дочерние категории родителя "Telephone"
+        """
+        queryset = super().get_queryset()
+        # Если НИ ОДИН фильтр не указан, возвращаем только корневые категории
+        if 'parent' not in self.request.query_params and 'parent_name' not in self.request.query_params:
+            queryset = queryset.filter(parent__isnull=True)
+        return queryset
 
 # 3. Products
 class ProductViewSet(viewsets.ModelViewSet):
@@ -59,7 +111,10 @@ class ProductViewSet(viewsets.ModelViewSet):
             return [permissions.IsAuthenticated()]
         return [permissions.AllowAny()]
 
-    @swagger_auto_schema(operation_description="Получить отзывы товара")
+    @swagger_auto_schema(
+        operation_description="Получить отзывы товара",
+        responses={200: ReviewSerializer(many=True)}
+    )
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def reviews(self, request, pk=None):
         product = self.get_object()
