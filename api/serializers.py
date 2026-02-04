@@ -57,9 +57,13 @@ class OrderSerializer(serializers.ModelSerializer):
 # --- Checkout ---
 class CheckoutSerializer(serializers.Serializer):
     address = serializers.CharField(required=False)
-    # Заказываем конкретные позиции из корзины по их ID
+    
+    # ÓZGERIS: product_id emes, cart_item_id qabıllaymız
     selected_cart_items = serializers.ListField(
-        child=serializers.IntegerField(), write_only=True, required=True
+        child=serializers.IntegerField(), 
+        write_only=True, 
+        required=True,
+        help_text="Sebettegi elementlerdiń ID-leri (CartItem ID)"
     )
 
 # --- Telegram Login ---

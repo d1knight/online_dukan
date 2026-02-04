@@ -20,22 +20,23 @@ from .filters import ProductFilter, CategoryFilter
 from .utils import send_telegram_message
 from .pagination import CustomPagination
 
-# 1. Profile
+# 1. Profile (TEK GET HÁM PATCH)
 class UserProfileView(generics.RetrieveUpdateAPIView):
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
+    
+    # --- ÓZGERIS: Tek GET hám PATCH ruxsat etiledi (PUT joq) ---
+    http_method_names = ['get', 'patch']
+    # -----------------------------------------------------------
+
     def get_object(self):
         return self.request.user
 
-# 2. Categories (PAGINATION ÓSHIRILDI)
+# 2. Categories (Pagination óshirilgen)
 class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
-    
-    # --- ÓZGERIS: Paginaciyanı óshirdik ---
     pagination_class = None 
-    # -------------------------------------
-    
     permission_classes = [permissions.AllowAny]
     filter_backends = [DjangoFilterBackend]
     filterset_class = CategoryFilter 
@@ -76,7 +77,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
         user = request.user
         if Review.objects.filter(user=user, product=product).exists():
-             return Response({"error": "Siz aldın pikir qaldırg'ansız!"}, status=400)
+            return Response({"error": "Siz aldın pikir qaldırg'ansız!"}, status=400)
         
         has_purchased = OrderItem.objects.filter(order__user=user, product=product).exists()
         if not has_purchased:
@@ -102,10 +103,7 @@ class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPagination
 
-    @swagger_auto_schema(
-        operation_description="Vozvrashchayet soderzhimoye korziny.",
-        responses={200: CartSerializer()} 
-    )
+    @swagger_auto_schema(responses={200: CartSerializer()})
     def list(self, request):
         cart, _ = Cart.objects.get_or_create(user=request.user)
         serializer = CartSerializer(cart)
@@ -138,7 +136,7 @@ class CartViewSet(viewsets.ViewSet):
         CartItem.objects.filter(cart=cart, product_id=product_id).delete()
         return Response({"status": "Óshirildi"})
 
-# 5. Checkout
+# 5. Checkout (Cart Item ID menen)
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
@@ -152,6 +150,7 @@ class CheckoutView(APIView):
         address = serializer.validated_data.get('address', user.address)
         
         cart, _ = Cart.objects.get_or_create(user=user)
+        # Cart Item ID boyınsha izleymiz
         items_to_buy = cart.items.select_related('product').filter(id__in=selected_cart_item_ids)
         
         if not items_to_buy.exists(): return Response({"error": "Tovar tańlanbadi"}, 400)
@@ -163,6 +162,7 @@ class CheckoutView(APIView):
                 for item in items_to_buy:
                     if item.product.stock <= 0: raise ValueError(f"'{item.product.name}' tawsıldı!")
                     if item.product.stock < item.quantity: raise ValueError(f"'{item.product.name}' jetkiliksiz.")
+                    
                     price = item.product.discount_price if item.product.discount_price else item.product.price
                     total += price * item.quantity
                     prepared_items.append({'item': item, 'price': price})
@@ -173,6 +173,7 @@ class CheckoutView(APIView):
                     OrderItem.objects.create(order=order, product=item.product, price=data['price'], quantity=item.quantity)
                     item.product.stock -= item.quantity
                     item.product.save()
+                
                 items_to_buy.delete()
                 return Response({"status": "Buyırtpa qabıllandı", "order_id": order.id, "total_price": total}, 201)
         except ValueError as e: return Response({"error": str(e)}, 400)
@@ -185,7 +186,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by('-created_at')
 
-# Telegram
+# Telegram Webhook
 @method_decorator(csrf_exempt, name='dispatch')
 class TelegramWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -232,8 +233,9 @@ class TelegramWebhookView(APIView):
 
     def send_otp(self, user, chat_id):
         code = str(random.randint(100000, 999999))
-        expires_at = timezone.now() + timedelta(minutes=5)
-        user.verification_code = code; user.code_expires_at = expires_at; user.save(update_fields=['verification_code', 'code_expires_at'])
+        user.verification_code = code
+        user.code_expires_at = timezone.now() + timedelta(minutes=5)
+        user.save(update_fields=['verification_code', 'code_expires_at'])
         msg = f"🔒 Code: <code>{code}</code>\n\n🔑 Jan'adan kod aliw ushin /login"
         send_telegram_message(chat_id, msg, reply_markup={"remove_keyboard": True})
 
