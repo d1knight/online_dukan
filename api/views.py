@@ -7,7 +7,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import viewsets, generics, permissions, status, filters
+from rest_framework import viewsets, generics, permissions, status, filters, mixins
 from rest_framework.decorators import action
 from rest_framework_simplejwt.tokens import RefreshToken
 from drf_yasg.utils import swagger_auto_schema
@@ -16,7 +16,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import *
 from .serializers import *
-from .filters import ProductFilter
+from .filters import ProductFilter, CategoryFilter
 from .utils import send_telegram_message
 from .pagination import CustomPagination
 
@@ -27,12 +27,18 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
-# 2. Categories
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+# 2. Categories (PAGINATION ÓSHIRILDI)
+class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
-    pagination_class = CustomPagination
+    
+    # --- ÓZGERIS: Paginaciyanı óshirdik ---
+    pagination_class = None 
+    # -------------------------------------
+    
     permission_classes = [permissions.AllowAny]
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = CategoryFilter 
 
 # 3. Products
 class ProductViewSet(viewsets.ModelViewSet):
@@ -71,12 +77,15 @@ class ProductViewSet(viewsets.ModelViewSet):
         user = request.user
         if Review.objects.filter(user=user, product=product).exists():
              return Response({"error": "Siz aldın pikir qaldırg'ansız!"}, status=400)
+        
         has_purchased = OrderItem.objects.filter(order__user=user, product=product).exists()
         if not has_purchased:
             return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
+
         rating = request.data.get('rating')
         if not rating or int(rating) < 1 or int(rating) > 5:
              return Response({"error": "Reyting 1 hám 5 aralığında bolıwı kerek"}, status=400)
+
         Review.objects.create(user=user, product=product, rating=rating, comment=request.data.get('comment', ''))
         return Response({'status': 'Pikir qosıldı!'}, status=201)
 
@@ -93,9 +102,12 @@ class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPagination
 
+    @swagger_auto_schema(
+        operation_description="Vozvrashchayet soderzhimoye korziny.",
+        responses={200: CartSerializer()} 
+    )
     def list(self, request):
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        # Используем CartSerializer
         serializer = CartSerializer(cart)
         return Response(serializer.data)
 
@@ -109,6 +121,7 @@ class CartViewSet(viewsets.ViewSet):
 
         try: product = Product.objects.get(id=p_id)
         except Product.DoesNotExist: return Response({"error": "Tovar tabılmadı"}, 404)
+        
         if product.stock <= 0: return Response({"error": "Qoymada joq"}, 400)
         if product.stock < qty: return Response({"error": f"Jetkiliksiz. Qalǵanı: {product.stock}"}, 400)
         
@@ -139,7 +152,6 @@ class CheckoutView(APIView):
         address = serializer.validated_data.get('address', user.address)
         
         cart, _ = Cart.objects.get_or_create(user=user)
-        # Ищем по ID элемента корзины
         items_to_buy = cart.items.select_related('product').filter(id__in=selected_cart_item_ids)
         
         if not items_to_buy.exists(): return Response({"error": "Tovar tańlanbadi"}, 400)
@@ -151,7 +163,6 @@ class CheckoutView(APIView):
                 for item in items_to_buy:
                     if item.product.stock <= 0: raise ValueError(f"'{item.product.name}' tawsıldı!")
                     if item.product.stock < item.quantity: raise ValueError(f"'{item.product.name}' jetkiliksiz.")
-                    
                     price = item.product.discount_price if item.product.discount_price else item.product.price
                     total += price * item.quantity
                     prepared_items.append({'item': item, 'price': price})
@@ -174,7 +185,7 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by('-created_at')
 
-# Telegram Logic
+# Telegram
 @method_decorator(csrf_exempt, name='dispatch')
 class TelegramWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -186,12 +197,10 @@ class TelegramWebhookView(APIView):
         chat_id = message.get('chat', {}).get('id')
         text = message.get('text', '')
         contact = message.get('contact')
-        
         from_user = message.get('from', {})
         first_name = from_user.get('first_name', '') or ""
         last_name = from_user.get('last_name', '') or ""
         tg_username = from_user.get('username')
-
         if not chat_id: return Response(status=status.HTTP_200_OK)
 
         if text == '/start':
@@ -207,12 +216,10 @@ class TelegramWebhookView(APIView):
             if user.telegram_chat_id != str(chat_id): user.telegram_chat_id = str(chat_id); changed = True
             if user.first_name != first_name: user.first_name = first_name; changed = True
             if user.last_name != last_name: user.last_name = last_name; changed = True
-            
             new_username = tg_username if tg_username else first_name
             if not new_username: new_username = phone
             if user.username != new_username:
                 if not User.objects.filter(username=new_username).exclude(id=user.id).exists(): user.username = new_username; changed = True
-            
             if changed: user.save()
 
             if created: send_telegram_message(chat_id, "🎉 <b>Siz tabıslı dizimnen óttińiz!</b>")
@@ -225,9 +232,8 @@ class TelegramWebhookView(APIView):
 
     def send_otp(self, user, chat_id):
         code = str(random.randint(100000, 999999))
-        user.verification_code = code
-        user.code_expires_at = timezone.now() + timedelta(minutes=5)
-        user.save(update_fields=['verification_code', 'code_expires_at'])
+        expires_at = timezone.now() + timedelta(minutes=5)
+        user.verification_code = code; user.code_expires_at = expires_at; user.save(update_fields=['verification_code', 'code_expires_at'])
         msg = f"🔒 Code: <code>{code}</code>\n\n🔑 Jan'adan kod aliw ushin /login"
         send_telegram_message(chat_id, msg, reply_markup={"remove_keyboard": True})
 
