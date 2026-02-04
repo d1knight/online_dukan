@@ -3,10 +3,9 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView # TokenObtainPairView kerek emes
+from rest_framework_simplejwt.views import TokenRefreshView
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
-from rest_framework import permissions
 from api.views import *
 
 schema_view = get_schema_view(
@@ -25,19 +24,13 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     
-    
-    # Refresh token kerek boladı (Telegramnan alǵan tokendi jańalaw ushın)
+    # Auth (Только Telegram + Refresh Token)
     path('api/token/refresh/', TokenRefreshView.as_view()),
-    
-    # Telegram Auth
     path('api/telegram/webhook/', TelegramWebhookView.as_view()),
     path('api/auth/telegram/', TelegramAuthView.as_view()),
     
-    
-    # Profile
+    # Profile & Shop
     path('api/profile/', UserProfileView.as_view()), 
-
-    # Shop
     path('api/checkout/', CheckoutView.as_view()),
     
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0)),

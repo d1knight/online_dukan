@@ -2,9 +2,6 @@ import requests
 from django.conf import settings
 
 def send_telegram_message(chat_id, text, reply_markup=None):
-    """
-    Отправляет сообщение в Telegram.
-    """
     token = settings.TELEGRAM_BOT_TOKEN
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     
@@ -18,8 +15,6 @@ def send_telegram_message(chat_id, text, reply_markup=None):
         data["reply_markup"] = reply_markup
         
     try:
-        response = requests.post(url, json=data)
-        return response.json()
+        requests.post(url, json=data)
     except Exception as e:
         print(f"Telegram send error: {e}")
-        return None

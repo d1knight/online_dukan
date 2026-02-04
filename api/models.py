@@ -7,18 +7,19 @@ from django.utils.text import slugify
 class User(AbstractUser):
     ROLES = (('admin', 'Admin'), ('client', 'Client'))
     role = models.CharField(max_length=10, choices=ROLES, default='client')
-    # Телефон уникальный логиндай
-    phone = models.CharField(max_length=20, blank=True, unique=True) 
+    # Телефон - это главный идентификатор
+    phone = models.CharField(max_length=20, blank=True, unique=True)
     address = models.TextField(blank=True)
-    REQUIRED_FIELDS = ['phone']
     
-    # --- TELEGRAMнын полясы ---
+    # Поля для Telegram Auth
     telegram_chat_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
     verification_code = models.CharField(max_length=6, null=True, blank=True)
     code_expires_at = models.DateTimeField(null=True, blank=True)
 
+    REQUIRED_FIELDS = ['phone']
+
     def __str__(self):
-        return self.username or self.phone
+        return self.phone or self.username
 
 # Категориялар
 class Category(models.Model):

@@ -20,16 +20,21 @@ from .filters import ProductFilter
 from .utils import send_telegram_message
 from .pagination import CustomPagination
 
+# 1. Profile
+class UserProfileView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    def get_object(self):
+        return self.request.user
 
-
-# Катигориялар
+# 2. Categories
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
     pagination_class = CustomPagination
     permission_classes = [permissions.AllowAny]
 
-# Товарлар
+# 3. Products
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
@@ -66,15 +71,12 @@ class ProductViewSet(viewsets.ModelViewSet):
         user = request.user
         if Review.objects.filter(user=user, product=product).exists():
              return Response({"error": "Siz aldın pikir qaldırg'ansız!"}, status=400)
-        
         has_purchased = OrderItem.objects.filter(order__user=user, product=product).exists()
         if not has_purchased:
             return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
-
         rating = request.data.get('rating')
         if not rating or int(rating) < 1 or int(rating) > 5:
              return Response({"error": "Reyting 1 hám 5 aralığında bolıwı kerek"}, status=400)
-
         Review.objects.create(user=user, product=product, rating=rating, comment=request.data.get('comment', ''))
         return Response({'status': 'Pikir qosıldı!'}, status=201)
 
@@ -86,27 +88,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         status_msg = "Aktivlestirildi" if product.is_active else "Jasırıldı"
         return Response({'status': 'success', 'message': f'Tovar {status_msg}'})
 
-# 3. Профиль
-class UserProfileView(generics.RetrieveUpdateAPIView):
-    serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
-    def get_object(self):
-        return self.request.user
-
-# 4. Корзина
+# 4. Cart
 class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = CustomPagination
 
     def list(self, request):
         cart, _ = Cart.objects.get_or_create(user=request.user)
-        queryset = cart.items.all().order_by('id')
-        paginator = CustomPagination()
-        page = paginator.paginate_queryset(queryset, request)
-        if page is not None:
-            serializer = CartItemSerializer(page, many=True)
-            return paginator.get_paginated_response(serializer.data)
-        return Response(CartItemSerializer(queryset, many=True).data)
+        # Используем CartSerializer
+        serializer = CartSerializer(cart)
+        return Response(serializer.data)
 
     @swagger_auto_schema(request_body=CartItemSerializer)
     @action(detail=False, methods=['post'])
@@ -118,7 +109,6 @@ class CartViewSet(viewsets.ViewSet):
 
         try: product = Product.objects.get(id=p_id)
         except Product.DoesNotExist: return Response({"error": "Tovar tabılmadı"}, 404)
-        
         if product.stock <= 0: return Response({"error": "Qoymada joq"}, 400)
         if product.stock < qty: return Response({"error": f"Jetkiliksiz. Qalǵanı: {product.stock}"}, 400)
         
@@ -135,21 +125,22 @@ class CartViewSet(viewsets.ViewSet):
         CartItem.objects.filter(cart=cart, product_id=product_id).delete()
         return Response({"status": "Óshirildi"})
 
-# 5. Заказ кылыу
+# 5. Checkout
 class CheckoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     @swagger_auto_schema(request_body=CheckoutSerializer)
     def post(self, request):
         serializer = CheckoutSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=400)
+        if not serializer.is_valid(): return Response(serializer.errors, status=400)
 
         user = request.user
-        selected_ids = serializer.validated_data.get('selected_products')
+        selected_cart_item_ids = serializer.validated_data.get('selected_cart_items')
         address = serializer.validated_data.get('address', user.address)
+        
         cart, _ = Cart.objects.get_or_create(user=user)
-        items_to_buy = cart.items.select_related('product').filter(product_id__in=selected_ids)
+        # Ищем по ID элемента корзины
+        items_to_buy = cart.items.select_related('product').filter(id__in=selected_cart_item_ids)
         
         if not items_to_buy.exists(): return Response({"error": "Tovar tańlanbadi"}, 400)
         
@@ -175,7 +166,7 @@ class CheckoutView(APIView):
                 return Response({"status": "Buyırtpa qabıllandı", "order_id": order.id, "total_price": total}, 201)
         except ValueError as e: return Response({"error": str(e)}, 400)
 
-# 6. Заказлар
+# 6. Orders
 class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -183,159 +174,76 @@ class OrderViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         return Order.objects.filter(user=self.request.user).order_by('-created_at')
 
-
-# Телеграм авторизация, регистрация
+# Telegram Logic
 @method_decorator(csrf_exempt, name='dispatch')
 class TelegramWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
-
     def post(self, request):
-        try:
-            data = json.loads(request.body)
-        except:
-            return Response(status=status.HTTP_200_OK)
-
+        try: data = json.loads(request.body)
+        except: return Response(status=status.HTTP_200_OK)
         message = data.get('message', {})
-        if not message:
-            return Response(status=status.HTTP_200_OK)
-
+        if not message: return Response(status=status.HTTP_200_OK)
         chat_id = message.get('chat', {}).get('id')
-        if not chat_id:
-            return Response(status=status.HTTP_200_OK)
-
         text = message.get('text', '')
         contact = message.get('contact')
+        
         from_user = message.get('from', {})
-        first_name = from_user.get('first_name', '') or ''
-        last_name = from_user.get('last_name', '') or ''
-        tg_username = from_user.get('username')  # может быть None или строка без @
+        first_name = from_user.get('first_name', '') or ""
+        last_name = from_user.get('last_name', '') or ""
+        tg_username = from_user.get('username')
+
+        if not chat_id: return Response(status=status.HTTP_200_OK)
 
         if text == '/start':
-            keyboard = {
-                "keyboard": [[{"text": "📱 Kontaktin'izdi jiberin'", "request_contact": True}]],
-                "resize_keyboard": True,
-                "one_time_keyboard": True
-            }
+            keyboard = {"keyboard": [[{"text": "📱 Kontaktin'izdi jiberin'", "request_contact": True}]], "resize_keyboard": True, "one_time_keyboard": True}
             msg = f"Salem {first_name} 👋\nOnline Dúkan'ǵa xosh kelibsiz!\n⬇️ Kontaktti jiberin'"
             send_telegram_message(chat_id, msg, reply_markup=keyboard)
-
         elif contact:
             phone = contact.get('phone_number')
-            if not phone:
-                return Response(status=status.HTTP_200_OK)
+            if not phone.startswith('+'): phone = '+' + phone
+            user, created = User.objects.get_or_create(phone=phone, defaults={'telegram_chat_id': str(chat_id)})
+            
+            changed = False
+            if user.telegram_chat_id != str(chat_id): user.telegram_chat_id = str(chat_id); changed = True
+            if user.first_name != first_name: user.first_name = first_name; changed = True
+            if user.last_name != last_name: user.last_name = last_name; changed = True
+            
+            new_username = tg_username if tg_username else first_name
+            if not new_username: new_username = phone
+            if user.username != new_username:
+                if not User.objects.filter(username=new_username).exclude(id=user.id).exists(): user.username = new_username; changed = True
+            
+            if changed: user.save()
 
-            if not phone.startswith('+'):
-                phone = '+' + phone
-
-            # ─── Определяем username ───────────────────────────────────────
-            if tg_username:
-                username = tg_username.lower().lstrip('@').strip()
-            elif first_name:
-                username = first_name.lower().strip().replace(' ', '_').replace('-', '_')
-            else:
-                # запасной вариант
-                last_digits = phone[-8:] if len(phone) >= 8 else '00000000'
-                username = f'user_{last_digits}'
-
-            # Делаем уникальным
-            base_username = username
-            counter = 1
-            while User.objects.filter(username=username).exclude(phone=phone).exists():
-                username = f'{base_username}_{counter}'
-                counter += 1
-
-            # ─── Создаём или обновляем пользователя ───────────────────────
-            user, created = User.objects.get_or_create(
-                phone=phone,
-                defaults={
-                    'username': username,
-                    'first_name': first_name,
-                    'last_name': last_name,
-                    'telegram_chat_id': str(chat_id),
-                }
-            )
-
-            if not created:
-                changed = False
-
-                if user.telegram_chat_id != str(chat_id):
-                    user.telegram_chat_id = str(chat_id)
-                    changed = True
-
-                if user.first_name != first_name:
-                    user.first_name = first_name
-                    changed = True
-
-                if user.last_name != last_name:
-                    user.last_name = last_name
-                    changed = True
-
-                if (user.username == phone or user.username.startswith('user_')) and tg_username:
-                    user.username = username
-                    changed = True
-
-                if changed:
-                    user.save()
-
-            if created:
-                send_telegram_message(chat_id, "🎉 <b>Siz tabıslı dizimnen óttińiz!</b>")
-            else:
-                send_telegram_message(chat_id, "👋 <b>Qaytqanın'izdan quwanıshlımız!</b>")
-
+            if created: send_telegram_message(chat_id, "🎉 <b>Siz tabıslı dizimnen óttińiz!</b>")
+            else: send_telegram_message(chat_id, "👋 <b>Qaytqanın'izdan quwanıshlımız!</b>")
             self.send_otp(user, chat_id)
-
         elif text == '/login':
-            try:
-                user = User.objects.get(telegram_chat_id=str(chat_id))
-                self.send_otp(user, chat_id)
-            except User.DoesNotExist:
-                send_telegram_message(chat_id, "/start basıń.")
-
+            try: user = User.objects.get(telegram_chat_id=str(chat_id)); self.send_otp(user, chat_id)
+            except User.DoesNotExist: send_telegram_message(chat_id, "/start basıń.")
         return Response(status=status.HTTP_200_OK)
 
     def send_otp(self, user, chat_id):
         code = str(random.randint(100000, 999999))
-        expires_at = timezone.now() + timedelta(minutes=5)
         user.verification_code = code
-        user.code_expires_at = expires_at
+        user.code_expires_at = timezone.now() + timedelta(minutes=5)
         user.save(update_fields=['verification_code', 'code_expires_at'])
-
         msg = f"🔒 Code: <code>{code}</code>\n\n🔑 Jan'adan kod aliw ushin /login"
         send_telegram_message(chat_id, msg, reply_markup={"remove_keyboard": True})
 
-
-
 class TelegramAuthView(APIView):
     permission_classes = [permissions.AllowAny]
-
     @swagger_auto_schema(
         request_body=openapi.Schema(
             type=openapi.TYPE_OBJECT,
-            properties={
-                'code': openapi.Schema(type=openapi.TYPE_STRING, description='Telegram kod', example="123456"),
-            },
+            properties={'code': openapi.Schema(type=openapi.TYPE_STRING, example="123456")},
             required=['code'],
-        ),
-        responses={
-            200: "Access & Refresh Tokens",
-            400: "Invalid Code"
-        }
+        )
     )
     def post(self, request):
         serializer = TelegramLoginSerializer(data=request.data)
-        
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
+        if not serializer.is_valid(): return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         user = serializer.validated_data['user']
-        user.verification_code = None
-        user.code_expires_at = None
-        user.save(update_fields=['verification_code', 'code_expires_at'])
-
+        user.verification_code = None; user.code_expires_at = None; user.save(update_fields=['verification_code', 'code_expires_at'])
         refresh = RefreshToken.for_user(user)
-        return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'username': user.username,
-            'role': user.role
-        })
+        return Response({'refresh': str(refresh), 'access': str(refresh.access_token), 'username': user.username, 'role': user.role})
