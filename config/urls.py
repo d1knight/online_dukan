@@ -3,7 +3,6 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenRefreshView
-from telegram_auth.views import TelegramWebhookView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularSwaggerView,
@@ -19,8 +18,6 @@ urlpatterns = [
     path('api/cart/', include('cart.urls')),
     path('api/orders/', include('orders.urls')),
     path('api/auth/', include('telegram_auth.urls')),
-    
-    path('api/telegram/webhook/', TelegramWebhookView.as_view(), name='telegram-webhook-alt'),
     
     # JWT
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),

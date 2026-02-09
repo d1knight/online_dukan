@@ -1,16 +1,23 @@
-from rest_framework import viewsets, permissions, filters, status
+from rest_framework import viewsets, permissions, filters, status, mixins
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
-from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from .models import Product, Category, Review
-from .serializers import ProductSerializer, CategorySerializer, ReviewSerializer
+from .serializers import (
+    ProductSerializer, 
+    CategorySerializer, 
+    ReviewSerializer, 
+    AddReviewSerializer
+)
 from .filters import ProductFilter, CategoryFilter
 from .pagination import CustomPagination
 
-
-class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
+class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
+    """
+    Только список категорий. 
+    Эндпоинт categories/{id} удален.
+    """
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
     pagination_class = None 
@@ -23,7 +30,6 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
         if 'parent' not in self.request.query_params and 'parent_name' not in self.request.query_params:
             queryset = queryset.filter(parent__isnull=True)
         return queryset
-
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
@@ -47,10 +53,37 @@ class ProductViewSet(viewsets.ModelViewSet):
         return [permissions.AllowAny()]
 
     @extend_schema(
-        responses={200: ReviewSerializer(many=True)},
-        description='Получить все отзывы о товаре',
-        summary='Отзывы о товаре'
+        request=AddReviewSerializer,
+        responses={201: {'type': 'object', 'properties': {'status': {'type': 'string'}}}},
+        description='Добавить или обновить отзыв. Нужно передать rating (1-5) или comment.',
+        summary='Добавить отзыв'
     )
+    @action(detail=True, methods=['post'], url_path='add_review')
+    def add_review(self, request, pk=None):
+        from orders.models import OrderItem
+        
+        product = self.get_object()
+        user = request.user
+        
+        serializer = AddReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        if not OrderItem.objects.filter(order__user=user, product=product).exists():
+            return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
+
+        defaults = {}
+        if serializer.validated_data.get('rating') is not None:
+            defaults['rating'] = serializer.validated_data['rating']
+        if serializer.validated_data.get('comment') is not None:
+            defaults['comment'] = serializer.validated_data['comment']
+
+        review, created = Review.objects.update_or_create(
+            user=user, product=product,
+            defaults=defaults
+        )
+        msg = "Pikir qosıldı!" if created else "Pikir jańalandı!"
+        return Response({'status': msg}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
     @action(detail=True, methods=['get'], permission_classes=[permissions.AllowAny])
     def reviews(self, request, pk=None):
         product = self.get_object()
@@ -59,95 +92,11 @@ class ProductViewSet(viewsets.ModelViewSet):
         if page is not None:
             serializer = ReviewSerializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        serializer = ReviewSerializer(reviews, many=True)
-        return Response(serializer.data)
+        return Response(ReviewSerializer(reviews, many=True).data)
 
-    @extend_schema(
-        request={
-            'type': 'object',
-            'properties': {
-                'rating': {'type': 'integer', 'minimum': 1, 'maximum': 5, 'nullable': True},
-                'comment': {'type': 'string', 'nullable': True}
-            }
-        },
-        responses={
-            201: {'type': 'object', 'properties': {'status': {'type': 'string'}}},
-            200: {'type': 'object', 'properties': {'status': {'type': 'string'}}}
-        },
-        examples=[
-            OpenApiExample(
-                'Отзыв с рейтингом и комментарием',
-                value={
-                    'rating': 5,
-                    'comment': 'Отличный товар!'
-                },
-                request_only=True
-            ),
-            OpenApiExample(
-                'Только рейтинг',
-                value={
-                    'rating': 4
-                },
-                request_only=True
-            ),
-            OpenApiExample(
-                'Только комментарий',
-                value={
-                    'comment': 'Хороший товар, но есть минусы'
-                },
-                request_only=True
-            )
-        ],
-        description='Добавить или обновить отзыв о товаре',
-        summary='Добавить отзыв'
-    )
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path='add_review')
-    def add_review(self, request, pk=None):
-        from orders.models import OrderItem
-        
-        if not request.user.is_authenticated:
-            return Response({"error": "Avtorizatsiyadan o'tiń"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        product = self.get_object()
-        user = request.user
-        
-        has_purchased = OrderItem.objects.filter(order__user=user, product=product).exists()
-        if not has_purchased:
-            return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
-
-        rating = request.data.get('rating')
-        comment = request.data.get('comment')
-
-        if not rating and not comment:
-             return Response({"error": "Reyting yamasa kommentariy jazıwıńız kerek"}, status=400)
-
-        if rating is not None:
-            try:
-                rating = int(rating)
-                if not (1 <= rating <= 5): raise ValueError
-            except (ValueError, TypeError):
-                return Response({"error": "Reyting 1 hám 5 aralığında bolıwı kerek"}, status=400)
-
-        defaults = {}
-        if comment is not None: defaults['comment'] = comment
-        if rating is not None: defaults['rating'] = rating
-
-        review, created = Review.objects.update_or_create(
-            user=user, product=product,
-            defaults=defaults
-        )
-        msg = "Pikir qosıldı!" if created else "Pikir jańalandı!"
-        return Response({'status': msg}, status=201 if created else 200)
-
-    @extend_schema(
-        responses={200: {'type': 'object', 'properties': {'status': {'type': 'string'}, 'message': {'type': 'string'}}}},
-        description='Активировать/деактивировать товар (только для администратора)',
-        summary='Переключить активность товара'
-    )
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def toggle_active(self, request, pk=None):
         product = self.get_object()
         product.is_active = not product.is_active
         product.save()
-        status_msg = "Aktivlestirildi" if product.is_active else "Jasırıldı"
-        return Response({'status': 'success', 'message': f'Tovar {status_msg}'})
+        return Response({'status': 'success', 'message': f'Tovar {"Aktivlestirildi" if product.is_active else "Jasırıldı"}'})

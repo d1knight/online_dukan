@@ -2,12 +2,10 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from .models import Product, Category, Review
 
-
 class CategorySerializer(serializers.ModelSerializer):
     class Meta: 
         model = Category
         fields = '__all__'
-
 
 class ReviewSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
@@ -17,6 +15,24 @@ class ReviewSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'rating', 'comment', 'created_at']
         extra_kwargs = {'comment': {'required': False}}
 
+# НОВЫЙ СЕРИАЛИЗАТОР ДЛЯ SWAGGER И ВАЛИДАЦИИ
+class AddReviewSerializer(serializers.Serializer):
+    rating = serializers.IntegerField(
+        min_value=1, 
+        max_value=5, 
+        required=False, 
+        help_text="Оценка от 1 до 5"
+    )
+    comment = serializers.CharField(
+        required=False, 
+        allow_blank=True, 
+        help_text="Текст отзыва"
+    )
+
+    def validate(self, attrs):
+        if not attrs.get('rating') and not attrs.get('comment'):
+            raise serializers.ValidationError("Нужно указать хотя бы оценку или комментарий.")
+        return attrs
 
 class ProductSerializer(serializers.ModelSerializer):
     category = serializers.PrimaryKeyRelatedField(queryset=Category.objects.all())

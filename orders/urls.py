@@ -8,6 +8,6 @@ router = DefaultRouter()
 router.register(r'', OrderViewSet, basename='order')
 
 urlpatterns = [
-    path('', include(router.urls)),
     path('checkout/', CheckoutView.as_view(), name='checkout'),
+    path('', include(router.urls)),
 ]
