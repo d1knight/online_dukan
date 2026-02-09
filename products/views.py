@@ -14,14 +14,10 @@ from .filters import ProductFilter, CategoryFilter
 from .pagination import CustomPagination
 
 class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
-    """
-    Только список категорий. 
-    Эндпоинт categories/{id} удален.
-    """
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
     pagination_class = None 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.AllowAny] # Просмотр категорий доступен всем
     filter_backends = [DjangoFilterBackend]
     filterset_class = CategoryFilter
     
@@ -40,42 +36,47 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering_fields = ['price']
     pagination_class = CustomPagination
 
+    def get_permissions(self):
+        # 1. Добавление, удаление и редактирование товара — только Админ
+        if self.action in ['create', 'update', 'partial_update', 'destroy', 'toggle_active']:
+            return [permissions.IsAdminUser()]
+        # 2. Добавление отзыва — только авторизованный клиент
+        if self.action == 'add_review':
+            return [permissions.IsAuthenticated()]
+        # 3. Просмотр списка товаров и одного товара — всем (AllowAny)
+        return [permissions.AllowAny()]
+
     def get_queryset(self):
+        # Админ видит все, клиенты — только активные товары
         if self.request.user.is_staff:
             return Product.objects.all().order_by('-id')
         return Product.objects.filter(is_active=True).order_by('-id')
 
-    def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'toggle_active']:
-            return [permissions.IsAdminUser()]
-        if self.action in ['add_review']:
-            return [permissions.IsAuthenticated()]
-        return [permissions.AllowAny()]
-
     @extend_schema(
         request=AddReviewSerializer,
         responses={201: {'type': 'object', 'properties': {'status': {'type': 'string'}}}},
-        description='Добавить или обновить отзыв. Нужно передать rating (1-5) или comment.',
+        description='Добавить/обновить отзыв. Доступно только после покупки товара.',
         summary='Добавить отзыв'
     )
     @action(detail=True, methods=['post'], url_path='add_review')
     def add_review(self, request, pk=None):
         from orders.models import OrderItem
-        
         product = self.get_object()
         user = request.user
         
         serializer = AddReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
+        # Проверка покупки (клиент должен был купить этот товар ранее)
         if not OrderItem.objects.filter(order__user=user, product=product).exists():
             return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
 
-        defaults = {}
-        if serializer.validated_data.get('rating') is not None:
-            defaults['rating'] = serializer.validated_data['rating']
-        if serializer.validated_data.get('comment') is not None:
-            defaults['comment'] = serializer.validated_data['comment']
+        defaults = {
+            'rating': serializer.validated_data.get('rating'),
+            'comment': serializer.validated_data.get('comment')
+        }
+        # Убираем None значения, чтобы не затереть существующие данные при частичном обновлении
+        defaults = {k: v for k, v in defaults.items() if v is not None}
 
         review, created = Review.objects.update_or_create(
             user=user, product=product,
@@ -94,7 +95,7 @@ class ProductViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(serializer.data)
         return Response(ReviewSerializer(reviews, many=True).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
+    @action(detail=True, methods=['post'])
     def toggle_active(self, request, pk=None):
         product = self.get_object()
         product.is_active = not product.is_active
