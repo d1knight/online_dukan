@@ -3,7 +3,11 @@ import os
 from dotenv import load_dotenv
 from datetime import timedelta
 
-load_dotenv()
+
+if os.path.exists('.env.local'):
+    load_dotenv('.env.local')
+else:
+    load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -18,11 +22,19 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
+    # Third party
     'rest_framework',
     'rest_framework_simplejwt',
-    'drf_yasg',
+    'drf_spectacular',
     'django_filters',
-    'api.apps.ApiConfig',
+    
+    # Local apps (ВАЖНО: users ПЕРВЫМ!)
+    'users.apps.UsersConfig',
+    'products.apps.ProductsConfig',
+    'cart.apps.CartConfig',
+    'orders.apps.OrdersConfig',
+    'telegram_auth.apps.TelegramAuthConfig',
 ]
 
 MIDDLEWARE = [
@@ -66,15 +78,17 @@ DATABASES = {
     }
 }
 
-AUTH_PASSWORD_VALIDATORS = []  # Простой пароль
-AUTH_USER_MODEL = 'api.User'
+AUTH_PASSWORD_VALIDATORS = []
+AUTH_USER_MODEL = 'users.User'  # ВАЖНО!
 
 LANGUAGE_CODE = 'en-us' 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Tashkent'
 USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
@@ -87,12 +101,27 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
-SWAGGER_SETTINGS = {
-    'SECURITY_DEFINITIONS': {
-        'Bearer': {'type': 'apiKey', 'name': 'Authorization', 'in': 'header'}
-    }
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Online Dukan API',
+    'DESCRIPTION': 'API для интернет-магазина с аутентификацией через Telegram',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayOperationId': False,
+    },
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SECURITY': [
+        {
+            'type': 'http',
+            'scheme': 'bearer',
+            'bearerFormat': 'JWT',
+        }
+    ],
 }
 
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
@@ -107,23 +136,9 @@ SIMPLE_JWT = {
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_WEBHOOK_PATH = 'telegram/webhook/'  
 
-
-STATIC_URL = '/static/'
-
-
-
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-# ---------------------------
-
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-
-# 1. Разрешаем CORS (запросы с других доменов)
 CORS_ALLOW_ALL_ORIGINS = True 
 CORS_ALLOW_CREDENTIALS = True
 
-# 2. ВАЖНО: Разрешаем CSRF для Ngrok (именно это часто вызывает ошибку)
 CSRF_TRUSTED_ORIGINS = [
     'https://*.ngrok-free.dev',
     'https://*.ngrok-free.app',
@@ -131,5 +146,4 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8000',
 ]
 
-# 3. Сообщаем Django, что мы за прокси (Ngrok), чтобы он понимал HTTPS
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
