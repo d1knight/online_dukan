@@ -5,19 +5,53 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExampl
 from drf_spectacular.types import OpenApiTypes
 from .models import Cart, CartItem
 from products.models import Product
-from .serializers import CartSerializer, CartAddSerializer
+from .serializers import CartSerializer, CartAddSerializer, CartItemSerializer 
+from products.pagination import CustomPagination
 
 
 class CartViewSet(viewsets.ViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='page',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description='Номер страницы',
+                required=False
+            ),
+            OpenApiParameter(
+                name='page_size',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description='Количество элементов на странице',
+                required=False
+            )
+        ],
         responses={200: CartSerializer},
-        description='Получить содержимое корзины текущего пользователя',
+        description='Получить содержимое корзины текущего пользователя с пагинацией',
         summary='Моя корзина'
     )
     def list(self, request):
         cart, _ = Cart.objects.get_or_create(user=request.user)
+        queryset = cart.items.all().select_related('product').order_by('-added_at')
+        
+        paginator = CustomPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        
+        if page is not None:
+            serializer = CartItemSerializer(page, many=True)
+            
+            total_price = sum(
+                (item.product.discount_price if item.product.discount_price else item.product.price) * item.quantity 
+                for item in queryset
+            )
+            
+            response = paginator.get_paginated_response(serializer.data)
+            response.data['total_price'] = total_price
+            return response
+
         serializer = CartSerializer(cart)
         return Response(serializer.data)
 

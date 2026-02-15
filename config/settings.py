@@ -22,14 +22,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
-    # Third party
     'rest_framework',
     'rest_framework_simplejwt',
     'drf_spectacular',
     'django_filters',
-    
-    # Local apps (ВАЖНО: users ПЕРВЫМ!)
     'users.apps.UsersConfig',
     'products.apps.ProductsConfig',
     'cart.apps.CartConfig',
@@ -79,7 +75,7 @@ DATABASES = {
 }
 
 AUTH_PASSWORD_VALIDATORS = []
-AUTH_USER_MODEL = 'users.User'  # ВАЖНО!
+AUTH_USER_MODEL = 'users.User'
 
 LANGUAGE_CODE = 'en-us' 
 TIME_ZONE = 'Asia/Tashkent'
@@ -102,6 +98,17 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle', 
+        'rest_framework.throttling.UserRateThrottle', 
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',      
+        'user': '1000/day',     
+        'auth': '5/minute',     
+        'burst': '10/minute',
+    }
 }
 
 SPECTACULAR_SETTINGS = {

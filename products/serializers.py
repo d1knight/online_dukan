@@ -15,7 +15,7 @@ class ReviewSerializer(serializers.ModelSerializer):
         fields = ['id', 'username', 'rating', 'comment', 'created_at']
         extra_kwargs = {'comment': {'required': False}}
 
-# НОВЫЙ СЕРИАЛИЗАТОР ДЛЯ SWAGGER И ВАЛИДАЦИИ
+
 class AddReviewSerializer(serializers.Serializer):
     rating = serializers.IntegerField(
         min_value=1, 

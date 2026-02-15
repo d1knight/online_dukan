@@ -13,11 +13,14 @@ from .serializers import (
 from .filters import ProductFilter, CategoryFilter
 from .pagination import CustomPagination
 
+# ИМПОРТИРУЕМ нужный класс для лимитов
+from rest_framework.throttling import ScopedRateThrottle
+
 class CategoryViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     queryset = Category.objects.all().order_by('id')
     serializer_class = CategorySerializer
     pagination_class = None 
-    permission_classes = [permissions.AllowAny] # Просмотр категорий доступен всем
+    permission_classes = [permissions.AllowAny]
     filter_backends = [DjangoFilterBackend]
     filterset_class = CategoryFilter
     
@@ -36,18 +39,20 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering_fields = ['price']
     pagination_class = CustomPagination
 
+    def get_throttles(self): # rate_limit ушын
+        if self.action == 'add_review':
+            self.throttle_scope = 'burst'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
     def get_permissions(self):
-        # 1. Добавление, удаление и редактирование товара — только Админ
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'toggle_active']:
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [permissions.IsAdminUser()]
-        # 2. Добавление отзыва — только авторизованный клиент
         if self.action == 'add_review':
             return [permissions.IsAuthenticated()]
-        # 3. Просмотр списка товаров и одного товара — всем (AllowAny)
         return [permissions.AllowAny()]
 
     def get_queryset(self):
-        # Админ видит все, клиенты — только активные товары
         if self.request.user.is_staff:
             return Product.objects.all().order_by('-id')
         return Product.objects.filter(is_active=True).order_by('-id')
@@ -55,33 +60,43 @@ class ProductViewSet(viewsets.ModelViewSet):
     @extend_schema(
         request=AddReviewSerializer,
         responses={201: {'type': 'object', 'properties': {'status': {'type': 'string'}}}},
-        description='Добавить/обновить отзыв. Доступно только после покупки товара.',
+        description='Добавить или обновить отзыв. Доступно ТОЛЬКО после оплаты заказа.',
         summary='Добавить отзыв'
     )
     @action(detail=True, methods=['post'], url_path='add_review')
     def add_review(self, request, pk=None):
         from orders.models import OrderItem
+        
         product = self.get_object()
         user = request.user
         
         serializer = AddReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Проверка покупки (клиент должен был купить этот товар ранее)
-        if not OrderItem.objects.filter(order__user=user, product=product).exists():
-            return Response({"error": "Pikir qaldırıw ushın aldın satıp alıń"}, status=403)
+        has_paid_order = OrderItem.objects.filter(
+            order__user=user, 
+            product=product, 
+            order__status='paid'
+        ).exists()
+        
+        if not has_paid_order:
+            return Response(
+                {"error": "Pikir qaldırıw ushın aldın buyırtpanı tólew kerek"}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
 
         defaults = {
             'rating': serializer.validated_data.get('rating'),
             'comment': serializer.validated_data.get('comment')
         }
-        # Убираем None значения, чтобы не затереть существующие данные при частичном обновлении
         defaults = {k: v for k, v in defaults.items() if v is not None}
 
         review, created = Review.objects.update_or_create(
-            user=user, product=product,
+            user=user, 
+            product=product,
             defaults=defaults
         )
+        
         msg = "Pikir qosıldı!" if created else "Pikir jańalandı!"
         return Response({'status': msg}, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
@@ -89,15 +104,11 @@ class ProductViewSet(viewsets.ModelViewSet):
     def reviews(self, request, pk=None):
         product = self.get_object()
         reviews = product.reviews.all().order_by('-created_at')
+        
         page = self.paginate_queryset(reviews)
         if page is not None:
             serializer = ReviewSerializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        return Response(ReviewSerializer(reviews, many=True).data)
-
-    @action(detail=True, methods=['post'])
-    def toggle_active(self, request, pk=None):
-        product = self.get_object()
-        product.is_active = not product.is_active
-        product.save()
-        return Response({'status': 'success', 'message': f'Tovar {"Aktivlestirildi" if product.is_active else "Jasırıldı"}'})
+            
+        serializer = ReviewSerializer(reviews, many=True)
+        return Response(serializer.data)

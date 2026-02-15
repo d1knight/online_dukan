@@ -3,14 +3,13 @@ from django.db import models
 
 
 class User(AbstractUser):
-    """Модель пользователя с дополнительными полями"""
     ROLES = (('admin', 'Admin'), ('client', 'Client'))
     
     role = models.CharField(max_length=10, choices=ROLES, default='client')
     phone = models.CharField(max_length=20, blank=True, unique=True) 
     address = models.TextField(blank=True)
     
-    # Поля для Telegram авторизации
+    # Телеграм авторизация ушын керек полелар
     telegram_chat_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
     verification_code = models.CharField(max_length=6, null=True, blank=True)
     code_expires_at = models.DateTimeField(null=True, blank=True)
